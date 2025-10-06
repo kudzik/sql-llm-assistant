@@ -252,7 +252,20 @@ def create_gradio_interface():
         )
         state = gr.State([])
         
-
+        # Przykładowe pytania
+        gr.Examples(
+            examples=[
+                "Jakie mamy promocje na elektronikę?",
+                "Pokaż zgłoszenia wraz z danymi klientów",
+                "Ile mamy zgłoszeń w statusie 'w trakcie'?",
+                "Pokaż produkty droższe niż 1000 zł",
+                "Które produkty mają mało sztuk w magazynie?",
+                "Pokaż wszystkich klientów",
+                "Jakie są najdroższe produkty na promocji?",
+                "Kto ma otwarte zgłoszenia?"
+            ],
+            inputs=msg
+        )
 
         msg.submit(chat_with_db, inputs=[msg, state], outputs=[chatbot, state])
         msg.submit(lambda: "", None, msg)
