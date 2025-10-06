@@ -86,20 +86,24 @@ def run_sql_query(query, db_path='data.db'):
 # Generowanie SQL z pytania użytkownika przez OpenAI
 # =======================
 def generate_sql_from_question(question):
-    prompt = f"""
-    Przetłumacz pytanie użytkownika na bezpieczne zapytanie SQL dla bazy danych z tabelami:
-    products(id, name, category, price, promotion, stock), customers(id, name, email, phone),
-    service_requests(id, customer_id, product_id, request_date, status, description).
+    schema_info = """
+SCHEMA BAZY DANYCH:
+- products: id, name, category, price, promotion (1=tak, 0=nie), stock
+- customers: id, name, email, phone  
+- service_requests: id, customer_id, product_id, request_date, status, description
 
-    Pytanie: {question}
-    Zapytanie SQL:
-    """
+WAŻNE: 
+- promotion: 1 oznacza produkt na promocji, 0 oznacza brak promocji
+- Używaj tylko SELECT
+- Zwróć tylko zapytanie SQL bez dodatkowych komentarzy
+"""
+    
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Jesteś ekspertem SQL. Generuj tylko bezpieczne zapytania SELECT. Nie używaj DROP, DELETE, UPDATE, INSERT."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "Jesteś ekspertem SQL. Generuj tylko bezpieczne zapytania SELECT. Zwracaj wyłącznie kod SQL bez formatowania markdown."},
+                {"role": "user", "content": f"{schema_info}\n\nPytanie: {question}\n\nSQL:"}
             ],
             max_tokens=150,
             temperature=0
@@ -108,6 +112,8 @@ def generate_sql_from_question(question):
         # Usuń ewentualne markdown formatting
         if sql_query.startswith('```sql'):
             sql_query = sql_query.replace('```sql', '').replace('```', '').strip()
+        if sql_query.startswith('```'):
+            sql_query = sql_query.replace('```', '').strip()
         return sql_query
     except Exception as e:
         return f"Błąd generowania SQL: {e}"
@@ -122,39 +128,83 @@ def generate_natural_language_response(query_results):
     if not query_results:
         return "Nie znaleziono danych spełniających kryteria."
 
-    response = "Znalezione wyniki:\n"
-    for row in query_results:
-        response += ", ".join([f"{k}: {v}" for k, v in row.items()]) + "\n"
+    response = ""
+    for i, row in enumerate(query_results, 1):
+        response += f"{i}. "
+        # Formatuj czytelniej
+        if 'name' in row:
+            response += f"**{row['name']}**"
+            if 'category' in row:
+                response += f" ({row['category']})"
+            if 'price' in row:
+                response += f" - {row['price']} zł"
+            if 'promotion' in row:
+                response += f" {'🏷️ PROMOCJA' if row['promotion'] == 1 else ''}"
+            if 'stock' in row:
+                response += f" (stan: {row['stock']} szt.)"
+        else:
+            response += ", ".join([f"{k}: {v}" for k, v in row.items()])
+        response += "\n"
     return response
 
 # =======================
 # Funkcja łącząca wszystkie kroki - wywoływana przez Gradio
 # =======================
 def chat_with_db(user_question, history):
-    if not client.api_key:
-        error_msg = "Błąd: Brak klucza API OpenAI. Ustaw zmienną OPENAI_API_KEY."
-        history = history or []
+    history = history or []
+    
+    # Sprawdź klucz API
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key or api_key.strip() == '':
+        error_msg = "❌ Błąd: Brak klucza API OpenAI.\n\nUstaw zmienną OPENAI_API_KEY w pliku .env"
         history.append((user_question, error_msg))
         return history, history
     
+    # Generuj SQL
     sql_query = generate_sql_from_question(user_question)
+    
+    # Sprawdź czy generowanie SQL się powiodło
+    if sql_query.startswith("Błąd generowania SQL:"):
+        history.append((user_question, sql_query))
+        return history, history
+    
+    # Wykonaj zapytanie SQL
     results = run_sql_query(sql_query)
     answer = generate_natural_language_response(results)
-    history = history or []
-    history.append((user_question, f"SQL: {sql_query}\n\n{answer}"))
+    
+    # Formatuj odpowiedź
+    formatted_answer = f"🔍 **SQL:** `{sql_query}`\n\n📊 **Wynik:**\n{answer}"
+    history.append((user_question, formatted_answer))
     return history, history
 
 # =======================
 # Tworzenie i uruchomienie interfejsu Gradio
 # =======================
 def create_gradio_interface():
-    with gr.Blocks() as demo:
-        chatbot = gr.Chatbot()
-        msg = gr.Textbox(label="Zadaj pytanie")
+    with gr.Blocks(title="SQL LLM Assistant") as demo:
+        gr.Markdown("# 🤖 Asystent SQL LLM\nZadawaj pytania o dane w naturalnym języku!")
+        
+        chatbot = gr.Chatbot(height=400)
+        msg = gr.Textbox(
+            label="Zadaj pytanie o dane",
+            placeholder="np. Jakie mamy promocje na elektronikę?",
+            lines=1
+        )
         state = gr.State([])
+        
+        # Przykładowe pytania
+        gr.Examples(
+            examples=[
+                "Jakie mamy promocje na elektronikę?",
+                "Pokaż wszystkich klientów",
+                "Ile mamy produktów w magazynie?",
+                "Pokaż otwarte zgłoszenia serwisowe"
+            ],
+            inputs=msg
+        )
 
         msg.submit(chat_with_db, inputs=[msg, state], outputs=[chatbot, state])
-        msg.submit(lambda: "", None, msg)  # czyści pole input po wysłaniu
+        msg.submit(lambda: "", None, msg)
 
     return demo
 
