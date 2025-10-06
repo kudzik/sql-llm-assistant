@@ -16,11 +16,15 @@ client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 # Tworzenie przykładowej bazy SQLite
 # =======================
 def create_sample_db(db_path='data.db'):
+    # Usuń starą bazę jeśli istnieje
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
     c.execute('''
-        CREATE TABLE IF NOT EXISTS products (
+        CREATE TABLE products (
             id INTEGER PRIMARY KEY,
             name TEXT,
             category TEXT,
@@ -31,7 +35,7 @@ def create_sample_db(db_path='data.db'):
     ''')
 
     c.execute('''
-        CREATE TABLE IF NOT EXISTS customers (
+        CREATE TABLE customers (
             id INTEGER PRIMARY KEY,
             name TEXT,
             email TEXT,
@@ -40,7 +44,7 @@ def create_sample_db(db_path='data.db'):
     ''')
 
     c.execute('''
-        CREATE TABLE IF NOT EXISTS service_requests (
+        CREATE TABLE service_requests (
             id INTEGER PRIMARY KEY,
             customer_id INTEGER,
             product_id INTEGER,
@@ -52,18 +56,45 @@ def create_sample_db(db_path='data.db'):
         )
     ''')
 
-    # Dodaj przykładowe dane (jeśli tabele są puste)
-    c.execute('SELECT COUNT(*) FROM products')
-    if c.fetchone()[0] == 0:
-        c.execute('INSERT INTO products (name, category, price, promotion, stock) VALUES (?, ?, ?, ?, ?)', 
-                  ('Laptop XYZ', 'elektronika', 3000, 1, 15))
-        c.execute('INSERT INTO products (name, category, price, promotion, stock) VALUES (?, ?, ?, ?, ?)', 
-                  ('Telefon ABC', 'elektronika', 1200, 0, 30))
-        c.execute('INSERT INTO customers (name, email, phone) VALUES (?, ?, ?)', 
-                  ('Jan Kowalski', 'jan.kowalski@example.com', '600123456'))
-        c.execute('INSERT INTO service_requests (customer_id, product_id, request_date, status, description) VALUES (?, ?, ?, ?, ?)', 
-                  (1, 1, '2025-10-01', 'otwarty', 'Problem z baterią'))
-        conn.commit()
+    # Dodaj przykładowe dane
+    # Produkty
+    products = [
+        ('Laptop XYZ', 'elektronika', 3000, 1, 15),
+        ('Telefon ABC', 'elektronika', 1200, 0, 30),
+        ('Tablet Pro', 'elektronika', 2500, 1, 8),
+        ('Słuchawki Wireless', 'elektronika', 450, 0, 25),
+        ('Monitor 4K', 'elektronika', 1800, 1, 12),
+        ('Klawiatura Gaming', 'elektronika', 350, 0, 40),
+        ('Krzesło Biurowe', 'meble', 800, 0, 5),
+        ('Biurko Drewniane', 'meble', 1200, 1, 3),
+        ('Lampa LED', 'meble', 150, 0, 20),
+        ('Książka Python', 'książki', 80, 0, 50),
+        ('Kurs SQL', 'książki', 120, 1, 15)
+    ]
+    c.executemany('INSERT INTO products (name, category, price, promotion, stock) VALUES (?, ?, ?, ?, ?)', products)
+    
+    # Klienci
+    customers = [
+        ('Jan Kowalski', 'jan.kowalski@example.com', '600123456'),
+        ('Anna Nowak', 'anna.nowak@example.com', '601234567'),
+        ('Piotr Wiśniewski', 'piotr.wisniewski@example.com', '602345678'),
+        ('Maria Kowalczyk', 'maria.kowalczyk@example.com', '603456789'),
+        ('Tomasz Zieliński', 'tomasz.zielinski@example.com', '604567890')
+    ]
+    c.executemany('INSERT INTO customers (name, email, phone) VALUES (?, ?, ?)', customers)
+    
+    # Zgłoszenia serwisowe
+    service_requests = [
+        (1, 1, '2025-01-15', 'otwarty', 'Problem z baterią'),
+        (2, 2, '2025-01-10', 'zamknięty', 'Pęknięty ekran - wymieniono'),
+        (3, 3, '2025-01-12', 'w trakcie', 'Nie ładuje się tablet'),
+        (1, 4, '2025-01-08', 'zamknięty', 'Słuchawki nie łączą się - naprawiono'),
+        (4, 5, '2025-01-14', 'otwarty', 'Monitor migocze'),
+        (5, 1, '2025-01-11', 'w trakcie', 'Laptop się przegrzewa')
+    ]
+    c.executemany('INSERT INTO service_requests (customer_id, product_id, request_date, status, description) VALUES (?, ?, ?, ?, ?)', service_requests)
+    
+    conn.commit()
     conn.close()
 
 # =======================
@@ -128,22 +159,51 @@ def generate_natural_language_response(query_results):
     if not query_results:
         return "Nie znaleziono danych spełniających kryteria."
 
+    # Jeśli to pojedyncza wartość (np. COUNT)
+    if len(query_results) == 1 and len(query_results[0]) == 1:
+        key, value = list(query_results[0].items())[0]
+        if 'COUNT' in key.upper():
+            return f"Liczba wyników: **{value}**"
+        return f"{key}: **{value}**"
+
     response = ""
     for i, row in enumerate(query_results, 1):
         response += f"{i}. "
-        # Formatuj czytelniej
-        if 'name' in row:
-            response += f"**{row['name']}**"
-            if 'category' in row:
-                response += f" ({row['category']})"
-            if 'price' in row:
-                response += f" - {row['price']} zł"
-            if 'promotion' in row:
-                response += f" {'🏷️ PROMOCJA' if row['promotion'] == 1 else ''}"
+        
+        # Sprawdź czy to dane produktu (ma category i price)
+        is_product = 'category' in row and 'price' in row
+        
+        if is_product:
+            # Formatowanie dla produktów
+            response += f"**{row.get('name', 'Nieznany')}**"
+            response += f" ({row['category']})"
+            response += f" - {row['price']} zł"
+            if row.get('promotion') == 1:
+                response += f" 🏷️ PROMOCJA"
             if 'stock' in row:
                 response += f" (stan: {row['stock']} szt.)"
         else:
-            response += ", ".join([f"{k}: {v}" for k, v in row.items()])
+            # Formatowanie dla innych zapytań (w tym JOIN)
+            parts = []
+            for k, v in row.items():
+                if k == 'id':
+                    parts.append(f"ID: {v}")
+                elif k == 'name':
+                    parts.append(f"**{v}**")
+                elif k == 'status':
+                    parts.append(f"Status: {v}")
+                elif k == 'description':
+                    parts.append(f"Opis: {v}")
+                elif k == 'request_date':
+                    parts.append(f"Data: {v}")
+                elif k == 'email':
+                    parts.append(f"Email: {v}")
+                elif k == 'phone':
+                    parts.append(f"Tel: {v}")
+                else:
+                    parts.append(f"{k}: {v}")
+            response += ", ".join(parts)
+        
         response += "\n"
     return response
 
@@ -192,16 +252,7 @@ def create_gradio_interface():
         )
         state = gr.State([])
         
-        # Przykładowe pytania
-        gr.Examples(
-            examples=[
-                "Jakie mamy promocje na elektronikę?",
-                "Pokaż wszystkich klientów",
-                "Ile mamy produktów w magazynie?",
-                "Pokaż otwarte zgłoszenia serwisowe"
-            ],
-            inputs=msg
-        )
+
 
         msg.submit(chat_with_db, inputs=[msg, state], outputs=[chatbot, state])
         msg.submit(lambda: "", None, msg)
