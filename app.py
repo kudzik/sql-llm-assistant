@@ -1,11 +1,16 @@
 import sqlite3
-import openai
+import os
+from openai import OpenAI
 import gradio as gr
+from dotenv import load_dotenv
+
+# Ładowanie zmiennych środowiskowych
+load_dotenv()
 
 # =======================
 # Konfiguracja OpenAI API
 # =======================
-openai.api_key = 'TWÓJ_API_KEY'  # Zamień na swój klucz
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 # =======================
 # Tworzenie przykładowej bazy SQLite
@@ -89,16 +94,23 @@ def generate_sql_from_question(question):
     Pytanie: {question}
     Zapytanie SQL:
     """
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=prompt,
-        max_tokens=150,
-        temperature=0,
-        n=1,
-        stop=[";"]
-    )
-    sql_query = response.choices[0].text.strip()
-    return sql_query
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Jesteś ekspertem SQL. Generuj tylko bezpieczne zapytania SELECT. Nie używaj DROP, DELETE, UPDATE, INSERT."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=150,
+            temperature=0
+        )
+        sql_query = response.choices[0].message.content.strip()
+        # Usuń ewentualne markdown formatting
+        if sql_query.startswith('```sql'):
+            sql_query = sql_query.replace('```sql', '').replace('```', '').strip()
+        return sql_query
+    except Exception as e:
+        return f"Błąd generowania SQL: {e}"
 
 # =======================
 # Generowanie odpowiedzi naturalnym językiem
@@ -119,11 +131,17 @@ def generate_natural_language_response(query_results):
 # Funkcja łącząca wszystkie kroki - wywoływana przez Gradio
 # =======================
 def chat_with_db(user_question, history):
+    if not client.api_key:
+        error_msg = "Błąd: Brak klucza API OpenAI. Ustaw zmienną OPENAI_API_KEY."
+        history = history or []
+        history.append((user_question, error_msg))
+        return history, history
+    
     sql_query = generate_sql_from_question(user_question)
     results = run_sql_query(sql_query)
     answer = generate_natural_language_response(results)
     history = history or []
-    history.append((user_question, answer))
+    history.append((user_question, f"SQL: {sql_query}\n\n{answer}"))
     return history, history
 
 # =======================
