@@ -238,9 +238,9 @@ if __name__ == "__main__":
 ## 👥 Autor
 
 **Twój Profil GitHub**
-- 💼 LinkedIn: [twój-profil](https://linkedin.com/in/twoj-profil)
-- 📧 Email: twoj.email@example.com
-- 🌐 Portfolio: [twoja-strona.com](https://twoja-strona.com)
+- 💼 LinkedIn: [Artur Kud](https://www.linkedin.com/in/arturkud/)
+- 📧 Email: kudzik@outlook.com
+- 🌐 Portfolio: [https://arturkud.hashnode.dev/](https://arturkud.hashnode.dev/)
 
 ## 📜 Licencja
 
